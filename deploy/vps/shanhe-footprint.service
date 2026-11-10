@@ -1,0 +1,24 @@
+[Unit]
+Description=Shanhe Footprint Map
+After=network.target
+
+[Service]
+Type=simple
+User=shanhe
+Group=shanhe
+WorkingDirectory=/opt/shanhe-footprint-map
+EnvironmentFile=/etc/shanhe-footprint.env
+ExecStart=/opt/node24/bin/node /opt/shanhe-footprint-map/scripts/dev-server.mjs
+ExecStartPost=/opt/node24/bin/node /opt/shanhe-footprint-map/deploy/vps/healthcheck.mjs
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=35
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/opt/shanhe-footprint-map/.task-tmp
+
+[Install]
+WantedBy=multi-user.target

@@ -1,8 +1,9 @@
 import {createState,calculateSet,validateState,migrateProject} from './core.js';
 import {initSocial} from './social.js';
+import {uuid} from './uuid.js';
 const $=id=>document.getElementById(id), ns='http://www.w3.org/2000/svg';
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const clone=x=>structuredClone(x), uid=()=>crypto.randomUUID();
+const clone=x=>structuredClone(x), uid=uuid;
 let state=createState(),cities=[],provinces=[],cityMap=new Map(),user=null,revision=0,dirty=false,loaded=false,saving=false,saveAgain=false,conflict=false,conflictRemote=null;
 let undo=[],redo=[],mode='paint',tab='layers',comparison=null,setOp='intersection',setCodes=[],view={x:0,y:0,k:1},searchHits=new Set(),cityListeners=[],authMode='login';
 let saveTimer,toastTimer,layerDraftKey='atlas-v3:guest',generation=0,sessionExpired=false;

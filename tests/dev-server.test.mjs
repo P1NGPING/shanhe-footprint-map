@@ -6,6 +6,39 @@ import { resolve, relative, isAbsolute, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startDevServer } from '../scripts/dev-server.mjs';
 
+test('VPS proxy preserves the configured HTTPS origin and rejects foreign hosts and origins', async () => {
+  const tmpRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '.task-tmp');
+  const dataDir = resolve(tmpRoot, 'dev-server-test-' + crypto.randomUUID());
+  const origin = 'https://atlas.example';
+  const instance = await startDevServer({ port: 0, dataDir, quiet: true, publicOrigin: origin });
+  const request = (headers = {}, body) => new Promise((accept, reject) => {
+    const r = rawRequest(instance.url + (body ? '/api/auth/register' : '/api/auth/status'), {
+      method: body ? 'POST' : 'GET',
+      headers: { host: 'atlas.example', origin, 'content-type': 'application/json', ...headers }
+    }, res => {
+      res.resume();
+      res.once('end', () => accept({ status: res.statusCode, cookie: res.headers['set-cookie']?.[0] }));
+    });
+    r.once('error', reject); r.end(body && JSON.stringify(body));
+  });
+  try {
+    assert.equal((await request()).status, 200);
+    assert.equal((await request({ host: 'evil.example' })).status, 403);
+    const body = { username: 'proxy_test', password: 'proxy-test-password' };
+    assert.equal((await request({ origin: 'https://evil.example' }, body)).status, 403);
+    assert.equal((await request({ origin: 'http://atlas.example', 'x-forwarded-proto': 'http' }, body)).status, 403);
+    const registered = await request({ 'x-real-ip': '192.0.2.44', 'cf-connecting-ip': 'forged' }, body);
+    assert.equal(registered.status, 201);
+    assert.match(registered.cookie, /^__Host-atlas_session=/);
+    assert.match(registered.cookie, /; Secure/);
+  } finally {
+    await instance.close();
+    const part = relative(tmpRoot, dataDir);
+    assert.ok(part.startsWith('dev-server-test-') && !part.includes('..') && !isAbsolute(part));
+    rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
 test('real local HTTP serves assets, persists native accounts and photos, and blocks external paths and hosts', async () => {
   const tmpRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '.task-tmp');
   const dataDir = resolve(tmpRoot, 'dev-server-test-' + crypto.randomUUID());

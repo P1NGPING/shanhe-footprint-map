@@ -1,4 +1,5 @@
-// Local development only. Production uses the Worker entry point and D1/R2.
+// Node.js SQLite/filesystem adapter. PUBLIC_ORIGIN enables a fixed-origin VPS
+// deployment behind a trusted loopback reverse proxy; defaults remain local-only.
 import { createServer } from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
 import { createHash } from 'node:crypto';
@@ -7,6 +8,7 @@ import { readFile, writeFile, unlink } from 'node:fs/promises';
 import { resolve, relative, isAbsolute, extname, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Readable } from 'node:stream';
+import { isIP } from 'node:net';
 import { api } from '../worker/api.mjs';
 import { handleAuth, resolveIdentity } from '../worker/auth.mjs';
 
@@ -96,25 +98,30 @@ async function staticFile(url, method) {
     return new Response(body, { headers: { 'Content-Type': types[extname(real).toLowerCase()] || 'application/octet-stream', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' } });
   } catch (error) { if (['ENOENT', 'ENOTDIR'].includes(error.code)) return plain('Not found', 404); throw error; }
 }
-export async function startDevServer({ port = 4317, dataDir = resolve(tmpRoot, 'local-data'), quiet = false } = {}) {
+export async function startDevServer({ port = 4317, dataDir = resolve(tmpRoot, 'local-data'), quiet = false, publicOrigin = null } = {}) {
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('Invalid port');
+  const origin = publicOrigin ? new URL(publicOrigin) : null;
+  if (origin && (!['http:', 'https:'].includes(origin.protocol) || origin.origin !== publicOrigin)) throw new Error('PUBLIC_ORIGIN must be an HTTP(S) origin without a trailing slash');
   const { env, db } = localEnvironment(resolve(dataDir));
   let boundPort = port;
   const server = createServer(async (incoming, outgoing) => {
     let result;
     try {
       const host = incoming.headers.host || '';
-      const allowedHosts = new Set([`127.0.0.1:${boundPort}`, `localhost:${boundPort}`]);
+      const allowedHosts = origin ? new Set([origin.host]) : new Set([`127.0.0.1:${boundPort}`, `localhost:${boundPort}`]);
       if (!allowedHosts.has(host) || !incoming.url?.startsWith('/') || incoming.url.startsWith('//')) result = plain('Invalid host', 403);
       else {
-        const url = new URL(`http://${host}${incoming.url}`);
+        const url = new URL(`${origin?.origin || `http://${host}`}${incoming.url}`);
         if (url.pathname.startsWith('/api/')) {
           const headers = new Headers();
           for (const [name, value] of Object.entries(incoming.headers)) {
             if (value !== undefined) headers.set(name, Array.isArray(value) ? value.join(', ') : value);
           }
           // Match Cloudflare's trusted connecting-IP semantics; never trust the inbound value.
-          headers.set('cf-connecting-ip', incoming.socket.remoteAddress || '127.0.0.1');
+          const peer = incoming.socket.remoteAddress;
+          const proxiedIP = incoming.headers['x-real-ip'];
+          const trustedProxy = origin && ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(peer);
+          headers.set('cf-connecting-ip', trustedProxy && typeof proxiedIP === 'string' && isIP(proxiedIP) ? proxiedIP : peer || '127.0.0.1');
           const method = incoming.method || 'GET';
           const options = { method, headers };
           if (!['GET', 'HEAD'].includes(method)) { options.body = Readable.toWeb(incoming); options.duplex = 'half'; }
@@ -152,6 +159,6 @@ export async function startDevServer({ port = 4317, dataDir = resolve(tmpRoot, '
 }
 if (process.argv[1] && realpathSync(resolve(process.argv[1])) === realpathSync(fileURLToPath(import.meta.url))) {
   const port = process.env.PORT ? Number(process.env.PORT) : 4317;
-  const instance = await startDevServer({ port });
+  const instance = await startDevServer({ port, publicOrigin: process.env.PUBLIC_ORIGIN || null });
   for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, async () => { await instance.close(); process.exit(0); });
 }

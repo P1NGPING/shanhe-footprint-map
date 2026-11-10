@@ -1,5 +1,6 @@
 import {mountCityPicker} from './city-picker.js';
 import {compareFootprints} from './friend-comparison.js';
+import {uuid} from './uuid.js';
 
 const $ = (id) => document.getElementById(id);
 const MAX_PHOTOS = 3;
@@ -400,7 +401,7 @@ export function initSocial(app) {
         prepared.push(await preparePhoto(file));
         if (generation !== photoGeneration || !activeCity || destroyed) return;
       }
-      photos.push(...prepared.map((file) => ({id:crypto.randomUUID(),file,url:URL.createObjectURL(file)})));
+      photos.push(...prepared.map((file) => ({id:uuid(),file,url:URL.createObjectURL(file)})));
     } catch (error) {
       if (generation === photoGeneration) showError($('postFormError'),errorLabel(error));
     } finally {
